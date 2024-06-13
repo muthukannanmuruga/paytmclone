@@ -1,10 +1,14 @@
 pipeline {
     agent any
+    
     environment {
         DOCKER_IMAGE_NAME = 'paytm-clone-app'
         DOCKERHUB_USERNAME = 'muthukannanmuruga'
         DOCKERHUB_CREDENTIAL_ID = 'docker_credential'
+        AWS_REGION = 'ap-south-1'
+        AWS_CREDENTIAL_ID = 'aws-credentials'
     }
+    
     stages {
         stage('Git Checkout') {
             steps {
@@ -19,34 +23,47 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
                 script {
                     dir('backend') {
-                        sh "docker build -t $DOCKER_IMAGE_NAME ."
+                        sh "docker build -t ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} ."
                     }
                 }
             }
         }
-        
+
         stage('Push to DockerHub') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIAL_ID, usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_PASSWORD')]) {
-                        // Log in to DockerHub and push Docker image
                         sh """
-                        echo "$DOCKERHUB_PASSWORD" | docker login -u $DOCKERHUB_USERNAME --password-stdin
-                        docker tag $DOCKER_IMAGE_NAME $DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME
-                        docker push $DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME
+                        echo "${DOCKERHUB_PASSWORD}" | docker login -u ${DOCKERHUB_USERNAME} --password-stdin
+                        docker tag ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
+                        docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
                         """
                     }
                 }
             }
         }
 
-        
-        // Add more stages as needed
+        stage('Helm Deploy') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: AWS_CREDENTIAL_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh '''
+                            kubectl create ns helm-deployment || true
+                            helm upgrade --install first $WORKSPACE/backend/mychart --namespace helm-deployment --set image.tag=$BUILD_NUMBER
+                        '''
+                    }
+                }
+            }
+        }
     }
-    // Add post-build actions if necessary
 }
