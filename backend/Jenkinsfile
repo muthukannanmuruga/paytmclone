@@ -8,6 +8,9 @@ pipeline {
         AWS_REGION = 'ap-south-1'
         AWS_CREDENTIAL_ID = 'aws-credentials'
         GITHUB_PAT_CREDENTIAL_ID = 'github_pat'
+        SONARQUBE_SERVER = 'sonarserver'  // Name of SonarQube server defined in Jenkins
+        SONARQUBE_CREDENTIAL_ID = 'sonartoken'  // ID for SonarQube token in Jenkins credentials
+        SONARSCANNER = 'sonarscanner'
     }
     
     stages {
@@ -49,6 +52,31 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            environment {
+                scannerHome = tool SONARSCANNER
+            }
+            steps {
+                script {
+                    dir('app_code/backend') {
+                        withSonarQubeEnv(SONARQUBE_SERVER) {
+                            withCredentials([string(credentialsId: SONARQUBE_CREDENTIAL_ID, variable: 'SONARQUBE_TOKEN')]) {
+                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=paytm-clone-app -Dsonar.sources=. -Dsonar.login=${SONARQUBE_TOKEN}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 script {
@@ -72,17 +100,31 @@ pipeline {
                 }
             }
         }
-
+        
+        stage('Create namespace') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: AWS_CREDENTIAL_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh '''
+                            kubectl create ns paytm-argocd || true
+                        '''
+                    }
+                }
+            }
+        }
+        
         stage('Update Helm Chart Image Tag') {
             steps {
                 script {
                     dir('helm_code') {
                         sh "sed -i 's/tag: .*/tag: ${BUILD_NUMBER}/' values.yaml"
-                        
                         sh 'git status'
-
                         sh 'git add values.yaml'
-                        
                         withCredentials([string(credentialsId: GITHUB_PAT_CREDENTIAL_ID, variable: 'GITHUB_PAT')]) {
                             sh 'git config user.email "muthukannan.muruga@gmail.com"'
                             sh 'git config user.name "muthukannanmuruga"'
