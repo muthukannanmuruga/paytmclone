@@ -7,18 +7,43 @@ pipeline {
         DOCKERHUB_CREDENTIAL_ID = 'docker_credential'
         AWS_REGION = 'ap-south-1'
         AWS_CREDENTIAL_ID = 'aws-credentials'
+        GITHUB_PAT_CREDENTIAL_ID = 'github_pat'
     }
     
     stages {
-        stage('Git Checkout') {
+        stage('Create Directories') {
             steps {
-                git branch: 'main', url: 'https://github.com/muthukannanmuruga/paytmclone.git'
+                script {
+                    if (!fileExists('app_code')) {
+                        sh 'mkdir app_code'
+                    }
+                    
+                    if (!fileExists('helm_code')) {
+                        sh 'mkdir helm_code'
+                    }
+                }
+            }
+        }
+
+        stage('Clone App Code Repo') {
+            steps {
+                dir('app_code') {
+                    git url: 'https://github.com/muthukannanmuruga/paytmclone.git', branch: 'main'
+                }
+            }
+        }
+
+        stage('Clone Helm Chart Repo') {
+            steps {
+                dir('helm_code') {
+                    git url: 'https://github.com/muthukannanmuruga/HelmchartforPaytmclone.git', branch: 'main'
+                }
             }
         }
 
         stage('Add dependencies') {
             steps {
-                dir('backend') {
+                dir('app_code/backend') {
                     sh 'npm install'
                 }
             }
@@ -27,7 +52,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    dir('backend') {
+                    dir('app_code/backend') {
                         sh "docker build -t ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} ."
                     }
                 }
@@ -48,19 +73,22 @@ pipeline {
             }
         }
 
-        stage('Helm Deploy') {
+        stage('Update Helm Chart Image Tag') {
             steps {
                 script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: AWS_CREDENTIAL_ID,
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh '''
-                            kubectl create ns helm-deployment || true
-                            helm upgrade --install first $WORKSPACE/backend/mychart --namespace helm-deployment --set image.tag=$BUILD_NUMBER
-                        '''
+                    dir('helm_code') {
+                        sh "sed -i 's/tag: .*/tag: ${BUILD_NUMBER}/' values.yaml"
+                        
+                        sh 'git status'
+
+                        sh 'git add values.yaml'
+                        
+                        withCredentials([string(credentialsId: GITHUB_PAT_CREDENTIAL_ID, variable: 'GITHUB_PAT')]) {
+                            sh 'git config user.email "muthukannan.muruga@gmail.com"'
+                            sh 'git config user.name "muthukannanmuruga"'
+                            sh 'git commit -m "Update image tag in values.yaml with build number ${BUILD_NUMBER}"'
+                            sh 'git push https://$GITHUB_PAT@github.com/muthukannanmuruga/HelmchartforPaytmclone.git main'
+                        }
                     }
                 }
             }
