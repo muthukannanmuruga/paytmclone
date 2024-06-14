@@ -2,6 +2,7 @@ const express = require("express");
 const rootRouter = require("./routes/index")
 const cors= require("cors")
 
+//backend port 3000
 
 const app = express();
 const PORT = 3000;
