@@ -28,7 +28,7 @@ pipeline {
             }
         }
 
-        stage('Clone App Code Repo') {
+        stage('Git checkout application code') {
             steps {
                 dir('app_code') {
                     git url: 'https://github.com/muthukannanmuruga/paytmclone.git', branch: 'main'
@@ -36,7 +36,7 @@ pipeline {
             }
         }
 
-        stage('Clone Helm Chart Repo') {
+        stage('Git checkout helm chart') {
             steps {
                 dir('helm_code') {
                     git url: 'https://github.com/muthukannanmuruga/HelmchartforPaytmclone.git', branch: 'main'
@@ -44,7 +44,7 @@ pipeline {
             }
         }
 
-        stage('Add dependencies') {
+        stage('Add dependencies and Build application') {
             steps {
                 dir('app_code/backend') {
                     sh 'npm install'
@@ -61,7 +61,7 @@ pipeline {
                     dir('app_code/backend') {
                         withSonarQubeEnv(SONARQUBE_SERVER) {
                             withCredentials([string(credentialsId: SONARQUBE_CREDENTIAL_ID, variable: 'SONARQUBE_TOKEN')]) {
-                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=paytm-clone-app -Dsonar.sources=. -Dsonar.login=${SONARQUBE_TOKEN}"
+                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.login=${SONARQUBE_TOKEN}"
                             }
                         }
                     }
@@ -69,10 +69,16 @@ pipeline {
             }
         }
         
-        stage('Quality Gate') {
+        stage('Quality Gate check') {
             steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    waitForQualityGate abortPipeline: true
+                script {
+                    def qualityGate = waitForQualityGate()
+
+                    if (qualityGate.status != 'OK') {
+                        error "SonarQube Quality Gate failed: ${qualityGate.status}"
+                    } else {
+                        echo "SonarQube Quality Gates Passed"
+                    }
                 }
             }
         }
@@ -87,7 +93,7 @@ pipeline {
             }
         }
 
-        stage('Push to DockerHub') {
+        stage('Push docker image to DockerHub') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIAL_ID, usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_PASSWORD')]) {
@@ -101,7 +107,7 @@ pipeline {
             }
         }
         
-        stage('Create namespace') {
+        stage('Create EKS namespace') {
             steps {
                 script {
                     withCredentials([[
@@ -118,7 +124,7 @@ pipeline {
             }
         }
         
-        stage('Update Helm Chart Image Tag') {
+        stage('Update Helm Chart with latest Image Tag') {
             steps {
                 script {
                     dir('helm_code') {
