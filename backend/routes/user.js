@@ -64,6 +64,8 @@ router.post("/signup", async (req,res) => {
     })
 
     const token = jwttoken.sign({userId}, JWT_SECRET)
+    // Response with the token and set the X-User-ID header
+    res.set('X-User-ID', userId.toString()); // Set user ID in the response header
 
     res.json({
         message:"User created successfully",
@@ -101,6 +103,9 @@ router.post("/signin", async (req,res) => {
         const userId = isexistingUser._id
         const token = jwttoken.sign({user_id: isexistingUser._id}, JWT_SECRET)
         
+        // Response with the token and set the X-User-ID header
+        res.set('X-User-ID', userId.toString()); // Set user ID in the response header
+
         const account = await PaytmAccount.findOne({ userId });
         const balance = account ? account.balance : 0;
 
